@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Bulk Actions Exporter (FBX)",
     "author": "sivert-io (orig), nebobyeoli (fork)",
-    "version": (2, 3, 2),
+    "version": (2, 3, 3),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Actions Exporter", # actual sidebar is set via bl_category in each class
     "description": "Bulk Actions exporter in FBX format for Blender 4.0+, with additional QOL options",
@@ -15,6 +15,8 @@ bl_info = {
 import bpy
 import os
 import ast # used in class FBX_OT_load_native_preset(Operator)
+import re # used for regex naming
+
 from bpy.types import Operator, Panel, PropertyGroup, Menu
 from bpy.props import *
 
@@ -124,6 +126,23 @@ class FBXExportSettings(PropertyGroup):
     remove_prefix: StringProperty(name="Remove Prefix", default="", description="Removes this specific string from the start of the action name")
     remove_postfix: StringProperty(name="Remove Postfix", default="", description="Removes this specific string from the end of the action name")
 
+    # Regex Naming
+    use_regex: BoolProperty(
+        name="Use Regular Expressions", 
+        default=False, 
+        description="Enable advanced Python regex find and replace over action names"
+    )
+    regex_find: StringProperty(
+        name="Find Pattern", 
+        default="", 
+        description="The regex search pattern (e.g., ^prefix_.*|.*_postfix$)"
+    )
+    regex_replace: StringProperty(
+        name="Replace With", 
+        default="", 
+        description="The replacement text (supports groups like \\1)"
+    )
+
 
 
 
@@ -161,13 +180,18 @@ class FBX_OT_load_native_preset(Operator):
                         except Exception:
                             continue # Skip non-literal expressions or comments
                         
+
+                        # # Map native names directly to your PropertyGroup attributes
+                        # if hasattr(p, prop_name):
+                        #     # Convert lists from preset files into a Python set for ENUM_FLAG fields
+                        #     if prop_name == "object_types" and isinstance(value, (list, tuple, set)):
+                        #         setattr(p, prop_name, set(value))
+                        #     else:
+                        #         setattr(p, prop_name, value)
+
                         # Map native names directly to your PropertyGroup attributes
                         if hasattr(p, prop_name):
-                            # Convert lists from preset files into a Python set for ENUM_FLAG fields
-                            if prop_name == "object_types" and isinstance(value, (list, tuple, set)):
-                                setattr(p, prop_name, set(value))
-                            else:
-                                setattr(p, prop_name, value)
+                            setattr(p, prop_name, value)
                         elif prop_name == "mesh_smooth_type":
                             setattr(p, "mesh_smooth_type", value)
 
@@ -254,19 +278,52 @@ class FBX_PT_naming(Panel):
     bl_category = "Actions Exporter"
     bl_options = {'DEFAULT_CLOSED'}
 
+    ## (replace only, no regex)
+    # def draw(self, context):
+    #     p = context.scene.fbx_export
+    #     layout = self.layout
+        
+    #     col = layout.column(align=True)
+    #     col.label(text="Add Modifiers:")
+    #     col.prop(p, "name_prefix")
+    #     col.prop(p, "name_postfix")
+        
+    #     col_remove = layout.column(align=True)
+    #     col_remove.label(text="Remove Patterns:")
+    #     col_remove.prop(p, "remove_prefix")
+    #     col_remove.prop(p, "remove_postfix")
+
+    ## (with regex option)
     def draw(self, context):
         p = context.scene.fbx_export
         layout = self.layout
         
-        col = layout.column(align=True)
-        col.label(text="Add Modifiers:")
-        col.prop(p, "name_prefix")
-        col.prop(p, "name_postfix")
+        # Add the Regex toggle switch at the top of the panel
+        layout.prop(p, "use_regex", toggle=True, icon='TEXT')
+        layout.separator()
         
-        col_remove = layout.column(align=True)
-        col_remove.label(text="Remove Patterns:")
-        col_remove.prop(p, "remove_prefix")
-        col_remove.prop(p, "remove_postfix")
+        if p.use_regex:
+            col = layout.column(align=True)
+            col.label(text="Regex Find & Replace:")
+            col.prop(p, "regex_find", text="Find")
+            col.prop(p, "regex_replace", text="Replace")
+            
+            # Tiny helper hint for the user
+            col.separator()
+            col.label(text="Find '^anim_' to strip prefixes.", icon='INFO')
+            col.label(text="Find 'v[0-9]+' to strip versions.", icon='INFO')
+            col.label(text="Find: 'char_(.*)_walk_(.*)', Replace: '\\1_walk_\\2' to dynamically replace any.", icon='INFO')
+        else:
+            col = layout.column(align=True)
+            col.label(text="Add Modifiers:")
+            col.prop(p, "name_prefix")
+            col.prop(p, "name_postfix")
+            
+            col_remove = layout.column(align=True)
+            col_remove.label(text="Remove Patterns:")
+            col_remove.prop(p, "remove_prefix")
+            col_remove.prop(p, "remove_postfix")
+
 
 
 class FBX_PT_transform(Panel):
@@ -457,13 +514,25 @@ class ExportAllActionsOperator(Operator):
             # filepath = os.path.join(export_path, f"{action.name}.fbx")
             export_name = action.name
             
-            if p.remove_prefix and export_name.startswith(p.remove_prefix):
-                export_name = export_name[len(p.remove_prefix):]
-            if p.remove_postfix and export_name.endswith(p.remove_postfix):
-                export_name = export_name[:-len(p.remove_postfix)]
+            if p.use_regex:
+                # Process Regex renaming pipeline
+                if p.regex_find:
+                    try:
+                        export_name = re.sub(p.regex_find, p.regex_replace, export_name)
+                    except Exception as re_err:
+                        self.report({'WARNING'}, f"Regex Error on {action.name}: {re_err}")
+                final_filename = f"{export_name}.fbx"
+
+            else:
+                # Process standard string removal and additions
+                if p.remove_prefix and export_name.startswith(p.remove_prefix):
+                    export_name = export_name[len(p.remove_prefix):]
+                if p.remove_postfix and export_name.endswith(p.remove_postfix):
+                    export_name = export_name[:-len(p.remove_postfix)]
+                
+                # Combine final filename with configured strings
+                final_filename = f"{p.name_prefix}{export_name}{p.name_postfix}.fbx"
             
-            ## Combine final filename with configured strings
-            final_filename = f"{p.name_prefix}{export_name}{p.name_postfix}.fbx"
             filepath = os.path.join(export_path, final_filename)
 
 
@@ -524,6 +593,7 @@ class ExportAllActionsOperator(Operator):
         scene.frame_end = old_end
         self.report({'INFO'}, f"Exported {exported} actions")
         return {'FINISHED'}
+
 
 ## Options addition STEP 4: Register the Panels (added FBX_PT_include, FBX_PT_animation to the list)
 classes = [
