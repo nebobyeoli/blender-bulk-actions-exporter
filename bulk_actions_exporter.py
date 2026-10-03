@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Bulk Actions Exporter (FBX)",
     "author": "sivert-io (orig), nebobyeoli (fork)",
-    "version": (2, 3, 8),
+    "version": (2, 3, 9),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Actions Exporter", # actual sidebar is set via bl_category in each class
     "description": "Bulk Actions exporter in FBX format for Blender 4.0+, with additional QOL options",
@@ -69,6 +69,7 @@ def trigger_list_update(self, context):
     """Callback function triggered when settings change"""
     sync_action_filter_list(context.scene)
 ### end of STEP 1
+
 
 
 class FBXExportSettings(PropertyGroup):
@@ -237,6 +238,14 @@ class FBXExportSettings(PropertyGroup):
         description="Automatically detect and delete stray 'TEMP_' NLA tracks if a previous script loop crashed"
     )
 
+    # Auto-open in File Explorer
+    auto_open_folder: BoolProperty(
+        name="Auto-Open Directory After Export",
+        default=True,
+        description="Reveal the destination folder in File Explorer once the batch operation completes"
+    )
+
+
 
 
 
@@ -361,9 +370,11 @@ class FBX_PT_path(Panel):
 
     def draw(self, context):
         layout = self.layout
-        layout.prop(context.scene.fbx_export, "export_path")
-
+        p = context.scene.fbx_export
+        layout.prop(p, "export_path")
         layout.label(text="If unspecified, defaults to '//' (directory of this .blend file).", icon='INFO')
+        
+        layout.prop(p, "auto_open_folder", icon='FILEBROWSER') # Added toggle field
 
 
 
@@ -783,11 +794,16 @@ class ExportAllActionsOperator(Operator):
         # Use current .blend file's path if unspecified
         if not p.export_path:
             p.export_path = "//"
-        
+            
         export_path = p.export_path
         if p.export_path.startswith("//"):
             export_path = bpy.path.abspath(p.export_path) # os.path.dirname(bpy.data.filepath)
-        # # If the user picked an absolute path, convert it to Blender relative '//'
+        
+        # cf.
+        # abs_path = bpy.path.abspath(p.export_path) if p.export_path.startswith("//") else p.export_path
+        # abs_path = os.path.normpath(abs_path)
+
+        # cf.
         # if path and not path.startswith("//"):
         #     abs_path = os.path.abspath(bpy.path.abspath(path))
         #     rel_path = bpy.path.relpath(abs_path)
@@ -946,6 +962,23 @@ class ExportAllActionsOperator(Operator):
         scene.frame_start = old_start
         scene.frame_end = old_end
         self.report({'INFO'}, f"Exported {exported} actions")
+
+
+        # ─── Auto-open in File Explorer ───
+        if p.auto_open_folder and exported > 0:
+            try:
+                # Use Python's built-in os.startfile with the 'explore' operation verb.
+                # This uses the Windows native shell API directly rather than running line switches.
+                # - If the window does not exist: Opens it.
+                # - If minimized: Un-minimizes and focuses it.
+                # - If already open and active: Safely brings it to the front without closing it.
+                os.startfile(export_path, 'explore')
+
+            except Exception as exp_err:
+                self.report({'WARNING'}, f"Could not reveal folder window: {exp_err}")
+        # ───────────────────────────────────
+
+
         return {'FINISHED'}
 
 
