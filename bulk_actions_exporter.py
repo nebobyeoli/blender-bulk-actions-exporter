@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Bulk Actions Exporter (FBX)",
     "author": "sivert-io (orig), nebobyeoli (fork)",
-    "version": (2, 3, 4),
+    "version": (2, 3, 5),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Actions Exporter", # actual sidebar is set via bl_category in each class
     "description": "Bulk Actions exporter in FBX format for Blender 4.0+, with additional QOL options",
@@ -19,6 +19,56 @@ import re # used for regex naming
 
 from bpy.types import Operator, Panel, PropertyGroup, Menu
 from bpy.props import *
+
+
+### Action Filter List - STEP 1: Add the Checklist Property Groups
+class FBXActionSelectionItem(PropertyGroup):
+    """Holds the export toggle state for an individual action"""
+    is_selected: BoolProperty(name="", default=True)
+    action_name: StringProperty(name="")
+
+# Add this update function to sync your project data dynamically when you open the UI panel
+# def update_action_filter_list(self, context):
+#     p = context.scene.fbx_export
+#     # Clear out items that no longer exist in the Blender project database
+#     existing_names = {a.name for a in bpy.data.actions if a.use_fake_user}
+#    
+#     # Remove dead entries
+#     for i in reversed(range(len(p.action_filter_items))):
+#         if p.action_filter_items[i].action_name not in existing_names:
+#             p.action_filter_items.remove(i)
+#            
+#     # Add newly discovered actions to the filter checklist layout structure
+#     current_items = {item.action_name for item in p.action_filter_items}
+#     for action in bpy.data.actions:
+#         if action.use_fake_user and action.name not in current_items:
+#             item = p.action_filter_items.add()
+#             item.action_name = action.name
+#             item.is_selected = True
+
+def sync_action_filter_list(scene):
+    """Safely synchronizes action items without crashing the UI draw loop"""
+    p = scene.fbx_export
+    existing_names = {a.name for a in bpy.data.actions if a.use_fake_user}
+    
+    # Remove old items
+    for i in reversed(range(len(p.action_filter_items))):
+        if p.action_filter_items[i].action_name not in existing_names:
+            p.action_filter_items.remove(i)
+            
+    # Add new items safely
+    current_items = {item.action_name for item in p.action_filter_items}
+    for action in bpy.data.actions:
+        if action.use_fake_user and action.name not in current_items:
+            item = p.action_filter_items.add()
+            item.action_name = action.name
+            item.is_selected = True
+
+def trigger_list_update(self, context):
+    """Callback function triggered when settings change"""
+    sync_action_filter_list(context.scene)
+### end of STEP 1
+
 
 class FBXExportSettings(PropertyGroup):
     export_path: StringProperty(
@@ -90,7 +140,7 @@ class FBXExportSettings(PropertyGroup):
         default='X'
     )
 
-    ## Options addition STEP 1: Update the Properties
+    ## Options addition - STEP 1: Update the Properties
     use_selection: BoolProperty(name="Selected Objects", default=False)
     use_visible: BoolProperty(name="Visible Objects", default=True)
     use_active_collection: BoolProperty(name="Active Collection", default=False)
@@ -114,7 +164,8 @@ class FBXExportSettings(PropertyGroup):
     use_animation = True # fixed value, no user option
     bake_anim_use_all_bones: BoolProperty(name="Key All Bones", default=True)
     bake_anim_use_nla_strips: BoolProperty(name="NLA Strips", default=False)
-    bake_anim_use_all_actions: BoolProperty(name="All Actions", default=False)
+    # bake_anim_use_all_actions: BoolProperty(name="All Actions", default=False) # UI option, but unneeded bc we'll use "Select Actions to Export" instead
+    bake_anim_use_all_actions = False # fixed value, no user option
     bake_anim_force_startend_keying: BoolProperty(name="Force Start/End Keying", default=False)
     bake_anim_step: FloatProperty(name="Sampling Rate", default=1.0, min=0.01, max=100.0)
     bake_anim_simplify_factor: FloatProperty(name="Simplify", default=0.00, min=0.0, max=10.0)
@@ -142,6 +193,17 @@ class FBXExportSettings(PropertyGroup):
         default="", 
         description="The replacement text (supports groups like \\1)"
     )
+
+
+    ### Action Filter List - STEP 2: Update the Global Settings Class
+    action_filter_items: CollectionProperty(type=FBXActionSelectionItem)
+    action_filter_search: StringProperty(
+        name="Search Actions", 
+        default="", 
+        description="Filter down the action checklist view by text pattern matching",
+        update=trigger_list_update # Triggers sync safely outside draw loops
+    )
+    ### end of STEP 2
 
 
 
@@ -269,6 +331,9 @@ class FBX_PT_path(Panel):
         layout = self.layout
         layout.prop(context.scene.fbx_export, "export_path")
 
+        layout.label(text="If unspecified, defaults to '//' (directory of this .blend file).", icon='INFO')
+
+
 
 
 def get_predicted_export_name(action_name, p):
@@ -314,12 +379,12 @@ class FBX_PT_naming(Panel):
     # def draw(self, context):
     #     p = context.scene.fbx_export
     #     layout = self.layout
-        
+    #    
     #     col = layout.column(align=True)
     #     col.label(text="Add Modifiers:")
     #     col.prop(p, "name_prefix")
     #     col.prop(p, "name_postfix")
-        
+    #    
     #     col_remove = layout.column(align=True)
     #     col_remove.label(text="Remove Patterns:")
     #     col_remove.prop(p, "remove_prefix")
@@ -370,6 +435,86 @@ class FBX_PT_naming(Panel):
             box.label(text=f"Export:   {preview_name}.fbx", icon='CHECKMARK')
         else:
             box.label(text="No active action found on selected object.", icon='ERROR')
+
+
+### Action Filter List - STEP 3: Add the Action Filter UI Panel
+class FBX_OT_refresh_actions(Operator):
+    """Scan the blend file for new or updated actions safely"""
+    bl_idname = "fbx_export.refresh_actions"
+    bl_label = "Refresh Action List"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        sync_action_filter_list(context.scene)
+        return {'FINISHED'}
+
+class FBX_PT_action_selector(Panel):
+    bl_label = "Select Actions to Export"
+    bl_parent_id = "FBX_PT_export_main"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Actions Exporter"
+
+    def draw(self, context):
+        p = context.scene.fbx_export
+        layout = self.layout
+
+        # # Keep the checklist data layout fully synchronized with current project actions
+        # update_action_filter_list(None, context)
+        # Fix: Safe drawing layout implementation
+        row_top = layout.row(align=True)
+        row_top.operator("fbx_export.refresh_actions", text="Scan Actions", icon='FILE_REFRESH')
+        
+        # Draw Master Select All / Deselect All convenience control tools
+        row_tools = layout.row(align=True)
+        op_all = row_tools.operator("fbx_export.action_select_all", text="Select All")
+        op_all.action_type = 'SELECT'
+        op_none = row_tools.operator("fbx_export.action_select_all", text="Deselect All")
+        op_none.action_type = 'DESELECT'
+        
+        layout.prop(p, "action_filter_search", icon='VIEWZOOM', text="")
+        
+        # Render the scrollable checklist box item selection view container 
+        box = layout.box()
+        col = box.column(align=True)
+        
+        search_query = p.action_filter_search.lower()
+        visible_items = 0
+        
+        for item in p.action_filter_items:
+            # If search pattern is specified, filter list entries dynamically
+            if search_query and search_query not in item.action_name.lower():
+                continue
+                
+            row = col.row()
+            row.prop(item, "is_selected", text="")
+            row.label(text=item.action_name, icon='ANIM')
+            visible_items += 1
+            
+        if visible_items == 0:
+            col.label(text="No active actions. Click 'Scan Actions' above.", icon='INFO')
+### end of STEP 3
+
+### Action Filter List - STEP 4: Add the Helper Section Operators
+class FBX_OT_action_select_all(Operator):
+    """Select or deselect all items matching active action checklist configurations"""
+    bl_idname = "fbx_export.action_select_all"
+    bl_label = "Bulk Select Actions"
+    bl_options = {'INTERNAL'}
+    
+    action_type: EnumProperty(items=[('SELECT', "", ""), ('DESELECT', "", "")])
+
+    def execute(self, context):
+        p = context.scene.fbx_export
+        search_query = p.action_filter_search.lower()
+        
+        for item in p.action_filter_items:
+            if search_query and search_query not in item.action_name.lower():
+                continue
+            item.is_selected = (self.action_type == 'SELECT')
+            
+        return {'FINISHED'}
+### end of STEP 4
 
 
 
@@ -429,7 +574,7 @@ class FBX_PT_armature(Panel):
         layout.prop(p, "use_armature_deform_only")
         layout.prop(p, "add_leaf_bones")
 
-## Options addition STEP 2: Add the UI Panels
+## Options addition - STEP 2: Add the UI Panels
 class FBX_PT_include(Panel):
     bl_label = "Include"
     bl_parent_id = "FBX_PT_export_main"
@@ -536,9 +681,19 @@ class ExportAllActionsOperator(Operator):
         # Store the original active action to restore it later
         original_active_action = obj.animation_data.action
 
+
+        ### Action Filter List - STEP 5: Update the Operator Filtering Logic
+        # Create a fast lookup map dictionary of your checked custom UI choices
+        selection_map = {item.action_name: item.is_selected for item in p.action_filter_items}
+
         for action in bpy.data.actions:
             if not action.use_fake_user:
                 continue
+
+            # STEP 5: Intercept checklist choice: Skip this action loop if deselected by the user
+            if action.name in selection_map and not selection_map[action.name]:
+                continue
+            ### end of STEP 5
 
             start = int(action.frame_range[0])
             end = int(action.frame_range[1])
@@ -588,7 +743,7 @@ class ExportAllActionsOperator(Operator):
 
 
             try:
-                ## Options addition STEP 3: Update the Operator Parameters
+                ## Options addition - STEP 3: Update the Operator Parameters
                 bpy.ops.export_scene.fbx(
                     filepath=filepath,
                     use_selection=p.use_selection,
@@ -646,8 +801,10 @@ class ExportAllActionsOperator(Operator):
         return {'FINISHED'}
 
 
-## Options addition STEP 4: Register the Panels (added FBX_PT_include, FBX_PT_animation to the list)
+## Options addition - STEP 4: Register the Panels (added to list: FBX_PT_include, FBX_PT_animation)
+### Action Filter List - STEP 6: Update the Operator Filtering Logic  (added to list: FBXActionSelectionItem, FBX_OT_action_select_all, FBX_PT_action_selector)
 classes = [
+    FBXActionSelectionItem,
     FBXExportSettings,
 
     FBX_OT_load_native_preset,
@@ -663,6 +820,10 @@ classes = [
     FBX_PT_geometry,
     FBX_PT_armature,
     FBX_PT_animation,
+
+    FBX_OT_action_select_all,
+    FBX_OT_refresh_actions,
+    FBX_PT_action_selector,
 
     FBX_PT_export_button,
     ExportAllActionsOperator,
