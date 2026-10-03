@@ -1,12 +1,16 @@
 bl_info = {
-    "name": "FBX Action Exporter (Full Settings)",
-    "author": "You",
-    "version": (2, 2),
+    "name": "Bulk Actions Exporter (FBX)",
+    "author": "sivert-io (orig), nebobyeoli (fork)",
+    "version": (2, 3, 0),
     "blender": (4, 0, 0),
-    "location": "View3D > Sidebar > Armature Tools",
-    "description": "FBX exporter for all actions with full export settings and collapsible layout",
+    "location": "View3D > Sidebar > Actions Exporter", # actual sidebar is set via bl_category in each class
+    "description": "Bulk Actions exporter in FBX format for Blender 4.0+, with additional QOL options",
+    "doc_url": "https://github.com/sivert-io/fbx-action-exporter", # "Website"
+    "tracker_url": "", # "Feedback - Report a Bug"
     "category": "Import-Export",
 }
+
+# nebobyeoli(fork): The additional QOL options are mostly written with google ai search mode for personal use on Blender 4.5 LTS, Windows 10
 
 import bpy
 import os
@@ -14,7 +18,13 @@ from bpy.types import Operator, Panel, PropertyGroup
 from bpy.props import *
 
 class FBXExportSettings(PropertyGroup):
-    export_path: StringProperty(name="Export Path", subtype="DIR_PATH")
+    # export_path: StringProperty(name="Export Path", subtype="DIR_PATH")
+    export_path: StringProperty(
+        name="Export Path",
+        description="Path to export files (supports '//' for relative paths)",
+        default="//"
+    )
+
 
     # Transform
     global_scale: FloatProperty(name="Scale", default=1.0, min=0.001, max=1000.0)
@@ -80,11 +90,11 @@ class FBXExportSettings(PropertyGroup):
     )
 
 class FBX_PT_export_main(Panel):
-    bl_label = "FBX Action Export"
+    bl_label = "Bulk Actions Exporter (FBX)"
     bl_idname = "FBX_PT_export_main"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Armature Tools"
+    bl_category = "Actions Exporter"
 
     def draw(self, context):
         pass
@@ -94,7 +104,7 @@ class FBX_PT_path(Panel):
     bl_parent_id = "FBX_PT_export_main"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Armature Tools"
+    bl_category = "Actions Exporter"
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -106,7 +116,7 @@ class FBX_PT_transform(Panel):
     bl_parent_id = "FBX_PT_export_main"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Armature Tools"
+    bl_category = "Actions Exporter"
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -125,7 +135,7 @@ class FBX_PT_geometry(Panel):
     bl_parent_id = "FBX_PT_export_main"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Armature Tools"
+    bl_category = "Actions Exporter"
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -145,7 +155,7 @@ class FBX_PT_armature(Panel):
     bl_parent_id = "FBX_PT_export_main"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Armature Tools"
+    bl_category = "Actions Exporter"
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -162,7 +172,7 @@ class FBX_PT_export_button(Panel):
     bl_parent_id = "FBX_PT_export_main"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Armature Tools"
+    bl_category = "Actions Exporter"
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -181,9 +191,30 @@ class ExportAllActionsOperator(Operator):
             self.report({'ERROR'}, "Select an Armature")
             return {'CANCELLED'}
 
+
+
+        ### Edit "Export Path"
+
+        # if not p.export_path:
+        #     self.report({'ERROR'}, "Set an export directory")
+        #     return {'CANCELLED'}
+
+        # Use current .blend file's path if unspecified
         if not p.export_path:
-            self.report({'ERROR'}, "Set an export directory")
-            return {'CANCELLED'}
+            p.export_path = "//"
+        
+        export_path = p.export_path
+        if p.export_path.startswith("//"):
+            export_path = bpy.path.abspath(p.export_path) # os.path.dirname(bpy.data.filepath)
+        # # If the user picked an absolute path, convert it to Blender relative '//'
+        # if path and not path.startswith("//"):
+        #     abs_path = os.path.abspath(bpy.path.abspath(path))
+        #     rel_path = bpy.path.relpath(abs_path)
+
+        # Create folder if not exist
+        os.makedirs(export_path, exist_ok=True)
+
+
 
         if not obj.animation_data:
             obj.animation_data_create()
@@ -207,7 +238,7 @@ class ExportAllActionsOperator(Operator):
 
             scene.frame_start = start
             scene.frame_end = end
-            filepath = os.path.join(p.export_path, f"{action.name}.fbx")
+            filepath = os.path.join(export_path, f"{action.name}.fbx")
 
             try:
                 bpy.ops.export_scene.fbx(
