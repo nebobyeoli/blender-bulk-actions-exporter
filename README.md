@@ -1,89 +1,49 @@
-# 🛠️ FBX Action Exporter for Blender
+# Bulk Actions Exporter (FBX)
 
-![Add-on Interface Preview](preview.png)
+# Parent repository
 
-**FBX Action Exporter** is a Blender add-on that streamlines the process of exporting all animation actions (NLA tracks) as individual `.fbx` files.
+## [sivert-io/fbx-action-exporter (*"🛠️ FBX Action Exporter for Blender"*)](https://github.com/sivert-io/fbx-action-exporter)
 
-It's especially useful for game developers and animators working with engines like **Roblox**, **Unreal Engine**, **Unity**, and more.
+# About
 
----
+Bulk actions exporter in FBX format for Blender 4.0+, with additional QOL options.
 
-## 📋 Requirements
+Renamed `export_actions.py` to `bulk_actions_exporter.py` for better consistency.
 
-- **Blender 4.0 or higher**
-- Uses Blender's built-in FBX exporter
+The added options are mostly written with google ai search mode, for personal use on Blender 4.5 LTS.<br>
+I only tested this on my Windows 10 machine, so other OS users may have to tweak some parts for the exporting and Auto-open directory utilities.
 
----
+Troubleshooting while adding the options took a while, took about 6 hours excluding organizing for github commit, but I found this very useful for personal workflows nonetheless, especially when re-export/re-importing animations in mass after editing a bone.
 
-## ✨ Features
+## NOTE
 
-- **Batch Export Animations**  
-  Automatically exports each action as a separate `.fbx` file.
+I will likely not maintain this, **I will likely not add more options nor be able fix issues if they arise on other users.**<br>
+I tried my best as I was able to spend time on this, but I'm unsure if there will be issues on larger Blender files.
 
-- **Customizable Export Settings**  
-  Adjust transform, geometry, and armature options to fit your project's needs.
+**Always keep backups, if used on important project files, or test on a separate `.blend` file first.**
 
-- **User-Friendly Interface**  
-  Integrates seamlessly into Blender's UI with collapsible panels.
+This fork repository is mainly for personal documenting, and referencing purposes for if I have to edit/make another Blender addon again.
 
-- **Game Engine Compatibility**  
-  Works great with Roblox, Unreal Engine, Unity, and others.
+## Added options
 
----
+- Relative path support for "Export Path"
 
-## 🎮 Use Cases
+- Can use built-in FBX exporter's custom user presets
 
-- **Roblox**: Export custom character animations with proper scaling and orientation.
-- **Unreal Engine**: Seamlessly import animations into UE4/UE5.
-- **Unity**: Easily generate `.fbx` files for character rigs.
-- **Any Game Engine**: Quickly manage and export animation libraries in one click.
+- Rename export files: Add/remove prefix/postfix or Regex renaming, with rename preview
 
----
+- Choose actions to export instead of always exporting all actions, with search bar
 
-## 📦 Installation
+- Filter out actions from export list
 
-### 🧩 From GitHub Releases
+- Auto-open directory after export
 
-1. Go to the [Releases page](https://github.com/sivert-io/fbx-action-exporter/releases).
-2. Download the latest `fbx_action_exporter.py` file.
-3. In Blender, open `Edit > Preferences > Add-ons > Install...`.
-4. Select the downloaded `.py` file and install it.
-5. Enable the add-on from the list.
-6. Find it in the sidebar under `View3D > Armature Tools`.
+## How to use
 
----
+1. Download `bulk_actions_exporter.py`
 
-## 🚀 Getting Started
+2. In Blender, go to *Edit > Preferences > Add-ons*, click the top-right 'v' button, click *Install from Disk*, and select the downloaded `.py` file. Then enable the addon.
 
-1. Select your armature in the 3D view.
-2. Set the export path in the add-on panel.
-3. Configure your export settings.
-4. Click **Export All Actions** to generate individual `.fbx` files for each protected action.
+## Preview
 
-> 💡 Make sure your actions have **Fake User** enabled so they get saved with the file.
-
----
-
-## 📄 License
-
-MIT License
-
-Copyright (c) 2025 Sivert Gullberg Hansen
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+![addon preview image](preview.png)
