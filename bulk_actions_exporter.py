@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Bulk Actions Exporter (FBX)",
     "author": "sivert-io (orig), nebobyeoli (fork)",
-    "version": (2, 3, 5),
+    "version": (2, 3, 6),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Actions Exporter", # actual sidebar is set via bl_category in each class
     "description": "Bulk Actions exporter in FBX format for Blender 4.0+, with additional QOL options",
@@ -16,6 +16,7 @@ import bpy
 import os
 import ast # used in class FBX_OT_load_native_preset(Operator)
 import re # used for regex naming
+import fnmatch # used for Action Filter List: + Exclusion Filter
 
 from bpy.types import Operator, Panel, PropertyGroup, Menu
 from bpy.props import *
@@ -204,6 +205,18 @@ class FBXExportSettings(PropertyGroup):
         update=trigger_list_update # Triggers sync safely outside draw loops
     )
     ### end of STEP 2
+    
+    # + Exclusion Naming Pattern Filter
+    use_exclusion_filter: BoolProperty(
+        name="Skip by Naming Pattern",
+        default=False,
+        description="Automatically skip exporting any actions that match an exclusion text pattern"
+    )
+    exclusion_pattern: StringProperty(
+        name="Pattern",
+        default="test_*",
+        description="The wildcard pattern to skip (e.g., test_*, *_backup, temp_?)"
+    )
 
 
 
@@ -473,6 +486,17 @@ class FBX_PT_action_selector(Panel):
         op_none.action_type = 'DESELECT'
         
         layout.prop(p, "action_filter_search", icon='VIEWZOOM', text="")
+
+        
+        # Action Filter List - ─── + Exclusion Filter UI Layout ───
+        layout.separator()
+        box_ex = layout.box()
+        box_ex.prop(p, "use_exclusion_filter", text="Auto-Skip Patterns", icon='FILTER')
+        if p.use_exclusion_filter:
+            col_ex = box_ex.column(align=True)
+            col_ex.prop(p, "exclusion_pattern", text="Match")
+            col_ex.label(text="Use '*' for wildcards (e.g. test_*, *_backup)", icon='INFO')
+
         
         # Render the scrollable checklist box item selection view container 
         box = layout.box()
@@ -492,7 +516,7 @@ class FBX_PT_action_selector(Panel):
             visible_items += 1
             
         if visible_items == 0:
-            col.label(text="No active actions. Click 'Scan Actions' above.", icon='INFO')
+            col.label(text="No matching actions found.", icon='INFO')
 ### end of STEP 3
 
 ### Action Filter List - STEP 4: Add the Helper Section Operators
@@ -691,8 +715,14 @@ class ExportAllActionsOperator(Operator):
                 continue
 
             # STEP 5: Intercept checklist choice: Skip this action loop if deselected by the user
+            # 1. Evaluate User Selection List Filter
             if action.name in selection_map and not selection_map[action.name]:
                 continue
+
+            # 2. (+ Exclusion Filter) Evaluate Naming Wildcard Pattern Exclusion Filter
+            if p.use_exclusion_filter and p.exclusion_pattern:
+                if fnmatch.fnmatch(action.name.lower(), p.exclusion_pattern.lower()): # Use lowercase to search case-insensitive and robust
+                    continue # Skip this animation loop iteration entirely
             ### end of STEP 5
 
             start = int(action.frame_range[0])
