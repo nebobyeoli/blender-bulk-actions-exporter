@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Bulk Actions Exporter (FBX)",
     "author": "sivert-io (orig), nebobyeoli (fork)",
-    "version": (2, 3, 6),
+    "version": (2, 3, 7),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Actions Exporter", # actual sidebar is set via bl_category in each class
     "description": "Bulk Actions exporter in FBX format for Blender 4.0+, with additional QOL options",
@@ -206,7 +206,7 @@ class FBXExportSettings(PropertyGroup):
     )
     ### end of STEP 2
     
-    # + Exclusion Naming Pattern Filter
+    # + Exclusion Filter
     use_exclusion_filter: BoolProperty(
         name="Skip by Naming Pattern",
         default=False,
@@ -216,6 +216,18 @@ class FBXExportSettings(PropertyGroup):
         name="Pattern",
         default="test_*",
         description="The wildcard pattern to skip (e.g., test_*, *_backup, temp_?)"
+    )
+
+    # + Inclusion Filter
+    use_inclusion_filter: BoolProperty(
+        name="Limit by Naming Pattern",
+        default=False,
+        description="Only export actions that match an explicit text pattern string"
+    )
+    inclusion_pattern: StringProperty(
+        name="Pattern",
+        default="anim_*",
+        description="The wildcard pattern to include exclusively (e.g., anim_*, *_v1)"
     )
 
 
@@ -471,10 +483,10 @@ class FBX_PT_action_selector(Panel):
     def draw(self, context):
         p = context.scene.fbx_export
         layout = self.layout
+        layout.label(text="Actions need to have 'Fake User' enabled to be detected.", icon='INFO')
 
-        # # Keep the checklist data layout fully synchronized with current project actions
-        # update_action_filter_list(None, context)
-        # Fix: Safe drawing layout implementation
+        # update_action_filter_list(None, context) # Keep the checklist data layout fully synchronized with current project actions
+        # Safe drawing layout instead: Fix error from (None, context)
         row_top = layout.row(align=True)
         row_top.operator("fbx_export.refresh_actions", text="Scan Actions", icon='FILE_REFRESH')
         
@@ -488,35 +500,87 @@ class FBX_PT_action_selector(Panel):
         layout.prop(p, "action_filter_search", icon='VIEWZOOM', text="")
 
         
-        # Action Filter List - ─── + Exclusion Filter UI Layout ───
+        # Action Filter List - ─── + Inclusion & Exclusion Filter UI Block ───
         layout.separator()
-        box_ex = layout.box()
-        box_ex.prop(p, "use_exclusion_filter", text="Auto-Skip Patterns", icon='FILTER')
-        if p.use_exclusion_filter:
-            col_ex = box_ex.column(align=True)
-            col_ex.prop(p, "exclusion_pattern", text="Match")
-            col_ex.label(text="Use '*' for wildcards (e.g. test_*, *_backup)", icon='INFO')
+        box_filters = layout.box()
+        box_filters.label(text="Export Filters:", icon='FILTER')
 
+        # # Action Filter List - ─── + Exclusion Filter UI ───
+        # layout.separator()
+        # box_ex = layout.box()
+        # box_ex.prop(p, "use_exclusion_filter", text="Auto-Skip Patterns", icon='FILTER')
+        # if p.use_exclusion_filter:
+        #     col_ex = box_ex.column(align=True)
+        #     col_ex.prop(p, "exclusion_pattern", text="Match")
+        #     col_ex.label(text="Use '*' for wildcards (e.g. test_*, *_backup)", icon='INFO')
+
+        # + Inclusion Filter UI
+        row_inc = box_filters.row()
+        row_inc.prop(p, "use_inclusion_filter", text="Include Only")
+        if p.use_inclusion_filter:
+            box_filters.prop(p, "inclusion_pattern", text="Match")
+            
+        # + Exclusion Filter UI
+        row_exc = box_filters.row()
+        row_exc.prop(p, "use_exclusion_filter", text="Exclude")
+        if p.use_exclusion_filter:
+            box_filters.prop(p, "exclusion_pattern", text="Match")
+        
         
         # Render the scrollable checklist box item selection view container 
+        layout.separator()
         box = layout.box()
         col = box.column(align=True)
         
         search_query = p.action_filter_search.lower()
         visible_items = 0
+        total_queued = 0
         
         for item in p.action_filter_items:
-            # If search pattern is specified, filter list entries dynamically
+            # Handle text search bar filter reduction
             if search_query and search_query not in item.action_name.lower():
                 continue
-                
+            
+            
+            # Determine wildcard pattern states for live styling previews
+            is_pattern_skipped = False
+            
+            # Run background Inclusion Filter evaluation
+            if p.use_inclusion_filter and p.inclusion_pattern:
+                if not fnmatch.fnmatch(item.action_name.lower(), p.inclusion_pattern.lower()):
+                    is_pattern_skipped = True
+            # Run background Exclusion Filter evaluation
+            if p.use_exclusion_filter and p.exclusion_pattern:
+                if fnmatch.fnmatch(item.action_name.lower(), p.exclusion_pattern.lower()):
+                    is_pattern_skipped = True
+
+
+            # row = col.row()
+            # row.prop(item, "is_selected", text="")
+            # row.label(text=item.action_name, icon='ANIM')
+            # visible_items += 1
+            
             row = col.row()
-            row.prop(item, "is_selected", text="")
-            row.label(text=item.action_name, icon='ANIM')
+            # Filter visualization Rule: Gray out items that fail Inclusion/Exclusion Filters
+            if is_pattern_skipped:
+                row.active = False # Grays out the row controls
+                row.prop(item, "is_selected", text="")
+                row.label(text=f"{item.action_name} (Filtered Out)", icon='CANCEL')
+            else:
+                row.prop(item, "is_selected", text="")
+                row.label(text=item.action_name, icon='ANIM')
+                if item.is_selected:
+                    total_queued += 1
             visible_items += 1
             
+
+        # Display Dynamic Readout Queue Summary Counters
+        layout.separator()
         if visible_items == 0:
             col.label(text="No matching actions found.", icon='INFO')
+            col.label(text="Click 'Scan Actions', or check Export Filters.", icon='INFO')
+        else:
+            layout.label(text=f"Ready to Export: {total_queued} actions queued", icon='FILE_TICK')
 ### end of STEP 3
 
 ### Action Filter List - STEP 4: Add the Helper Section Operators
@@ -719,10 +783,15 @@ class ExportAllActionsOperator(Operator):
             if action.name in selection_map and not selection_map[action.name]:
                 continue
 
+            # 2. (+ Inclusion Filter) Evaluate Naming Wildcard Pattern Exclusion Filter
+            if p.use_inclusion_filter and p.inclusion_pattern:
+                if not fnmatch.fnmatch(action.name.lower(), p.inclusion_pattern.lower()):
+                    continue # Skip action
+
             # 2. (+ Exclusion Filter) Evaluate Naming Wildcard Pattern Exclusion Filter
             if p.use_exclusion_filter and p.exclusion_pattern:
                 if fnmatch.fnmatch(action.name.lower(), p.exclusion_pattern.lower()): # Use lowercase to search case-insensitive and robust
-                    continue # Skip this animation loop iteration entirely
+                    continue
             ### end of STEP 5
 
             start = int(action.frame_range[0])
