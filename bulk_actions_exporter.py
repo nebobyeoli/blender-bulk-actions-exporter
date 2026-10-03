@@ -993,10 +993,9 @@ classes = [
     FBX_MT_native_export_presets,
     FBX_PT_export_main,
     FBX_PT_export_presets_panel,
+
     FBX_PT_path,
-
-    FBX_PT_naming,
-
+    
     FBX_PT_include,
     FBX_PT_transform,
     FBX_PT_geometry,
@@ -1006,7 +1005,9 @@ classes = [
     FBX_OT_action_select_all,
     FBX_OT_action_invert_selection,
     FBX_OT_refresh_actions,
+
     FBX_PT_action_selector,
+    FBX_PT_naming,
 
     FBX_PT_export_button,
     ExportAllActionsOperator,
