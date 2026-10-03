@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Bulk Actions Exporter (FBX)",
     "author": "sivert-io (orig), nebobyeoli (fork)",
-    "version": (2, 3, 7),
+    "version": (2, 3, 8),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Actions Exporter", # actual sidebar is set via bl_category in each class
     "description": "Bulk Actions exporter in FBX format for Blender 4.0+, with additional QOL options",
@@ -228,6 +228,13 @@ class FBXExportSettings(PropertyGroup):
         name="Pattern",
         default="anim_*",
         description="The wildcard pattern to include exclusively (e.g., anim_*, *_v1)"
+    )
+
+    # + ─── NLA Safety Cleanup (purge) ───
+    auto_purge_leftovers: BoolProperty(
+        name="Auto-Purge Broken NLA Leftovers",
+        default=True,
+        description="Automatically detect and delete stray 'TEMP_' NLA tracks if a previous script loop crashed"
     )
 
 
@@ -496,6 +503,9 @@ class FBX_PT_action_selector(Panel):
         op_all.action_type = 'SELECT'
         op_none = row_tools.operator("fbx_export.action_select_all", text="Deselect All")
         op_none.action_type = 'DESELECT'
+
+        # + Invert action selection
+        row_tools.operator("fbx_export.action_invert", text="Invert Selection", icon='FILE_REFRESH')
         
         layout.prop(p, "action_filter_search", icon='VIEWZOOM', text="")
 
@@ -505,15 +515,6 @@ class FBX_PT_action_selector(Panel):
         box_filters = layout.box()
         box_filters.label(text="Export Filters:", icon='FILTER')
 
-        # # Action Filter List - ─── + Exclusion Filter UI ───
-        # layout.separator()
-        # box_ex = layout.box()
-        # box_ex.prop(p, "use_exclusion_filter", text="Auto-Skip Patterns", icon='FILTER')
-        # if p.use_exclusion_filter:
-        #     col_ex = box_ex.column(align=True)
-        #     col_ex.prop(p, "exclusion_pattern", text="Match")
-        #     col_ex.label(text="Use '*' for wildcards (e.g. test_*, *_backup)", icon='INFO')
-
         # + Inclusion Filter UI
         row_inc = box_filters.row()
         row_inc.prop(p, "use_inclusion_filter", text="Include Only")
@@ -521,13 +522,24 @@ class FBX_PT_action_selector(Panel):
             box_filters.prop(p, "inclusion_pattern", text="Match")
             
         # + Exclusion Filter UI
+        # layout.separator()
+        # box_ex = layout.box()
+        # box_ex.prop(p, "use_exclusion_filter", text="Auto-Skip Patterns", icon='FILTER')
+        # if p.use_exclusion_filter:
+        #     col_ex = box_ex.column(align=True)
+        #     col_ex.prop(p, "exclusion_pattern", text="Match")
+        #     col_ex.label(text="Use '*' for wildcards (e.g. test_*, *_backup)", icon='INFO')
         row_exc = box_filters.row()
         row_exc.prop(p, "use_exclusion_filter", text="Exclude")
         if p.use_exclusion_filter:
             box_filters.prop(p, "exclusion_pattern", text="Match")
+
+        # + ─── NLA Safety Cleanup (purge) Row ───
+        box_filters.separator()
+        box_filters.prop(p, "auto_purge_leftovers", icon='TRASH')
         
         
-        # Render the scrollable checklist box item selection view container 
+        # Render the Scrollable Checklist box item selection view container 
         layout.separator()
         box = layout.box()
         col = box.column(align=True)
@@ -603,6 +615,25 @@ class FBX_OT_action_select_all(Operator):
             
         return {'FINISHED'}
 ### end of STEP 4
+
+
+class FBX_OT_action_invert_selection(Operator):
+    """Invert the checkbox selection states for all visible items"""
+    bl_idname = "fbx_export.action_invert"
+    bl_label = "Invert Selection"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        p = context.scene.fbx_export
+        search_query = p.action_filter_search.lower()
+        
+        for item in p.action_filter_items:
+            # Respect the active search text pattern filter
+            if search_query and search_query not in item.action_name.lower():
+                continue
+            item.is_selected = not item.is_selected
+        
+        return {'FINISHED'}
 
 
 
@@ -732,6 +763,15 @@ class ExportAllActionsOperator(Operator):
             self.report({'ERROR'}, "Select an Armature")
             return {'CANCELLED'}
         
+        # + ─── NLA Safety Cleanup (purge) ───
+        if p.auto_purge_leftovers and obj.animation_data:
+            stray_tracks = [t for t in obj.animation_data.nla_tracks if t.name.startswith("TEMP_")]
+            if stray_tracks:
+                for track in stray_tracks:
+                    obj.animation_data.nla_tracks.remove(track)
+                self.report({'INFO'}, f"Cleaned up {len(stray_tracks)} broken temporary NLA tracks left from a previous crash")
+        # ─────────────────────────────────────
+
 
 
         ### Edit "Export Path"
@@ -774,6 +814,7 @@ class ExportAllActionsOperator(Operator):
         # Create a fast lookup map dictionary of your checked custom UI choices
         selection_map = {item.action_name: item.is_selected for item in p.action_filter_items}
 
+        valid_export_queue = []
         for action in bpy.data.actions:
             if not action.use_fake_user:
                 continue
@@ -794,13 +835,21 @@ class ExportAllActionsOperator(Operator):
                     continue
             ### end of STEP 5
 
+            valid_export_queue.append(action)
+
+        # Exit early if absolutely nothing is queued
+        if not valid_export_queue:
+            self.report({'WARNING'}, "No actions selected / No filter match for export")
+            return {'CANCELLED'}
+
+        for action in valid_export_queue:
             start = int(action.frame_range[0])
             end = int(action.frame_range[1])
 
-            # 1. Force the active action database slot to target the current loop's action
+            # 1. Force the active action slot to target the current action
             obj.animation_data.action = action
 
-            # 2. Maintain NLA track setup if required for custom track properties
+            # 2. Init a temp NLA track (Maintain NLA track setup if required for custom track properties)
             track = obj.animation_data.nla_tracks.new()
             track.name = f"TEMP_{action.name}"
             strip = track.strips.new(action.name, start, action)
@@ -809,7 +858,7 @@ class ExportAllActionsOperator(Operator):
             
             scene.frame_start = start
             scene.frame_end = end
-            
+            # scene.frame_set(start) # Clear matrix cache transformation bugs
             
             # ## Process string removal and additions
             # # filepath = os.path.join(export_path, f"{action.name}.fbx")
@@ -836,7 +885,7 @@ class ExportAllActionsOperator(Operator):
             # 
             # filepath = os.path.join(export_path, final_filename)
 
-            # Use our unified sanitization and conversion helper function
+            # Process naming and path generation
             export_name = get_predicted_export_name(action.name, p)
             filepath = os.path.join(export_path, f"{export_name}.fbx")
 
@@ -887,7 +936,7 @@ class ExportAllActionsOperator(Operator):
             except Exception as e:
                 self.report({'WARNING'}, f"Export failed: {action.name}: {e}")
         
-            # Clean up the temporary NLA track
+            # Clean up the temp NLA track
             obj.animation_data.nla_tracks.remove(track)
             
         # Restore the viewport state back to what the user originally had selected
@@ -902,6 +951,7 @@ class ExportAllActionsOperator(Operator):
 
 ## Options addition - STEP 4: Register the Panels (added to list: FBX_PT_include, FBX_PT_animation)
 ### Action Filter List - STEP 6: Update the Operator Filtering Logic  (added to list: FBXActionSelectionItem, FBX_OT_action_select_all, FBX_PT_action_selector)
+# The order here determines the order of UI blocks in Blender editor!
 classes = [
     FBXActionSelectionItem,
     FBXExportSettings,
@@ -921,6 +971,7 @@ classes = [
     FBX_PT_animation,
 
     FBX_OT_action_select_all,
+    FBX_OT_action_invert_selection,
     FBX_OT_refresh_actions,
     FBX_PT_action_selector,
 
