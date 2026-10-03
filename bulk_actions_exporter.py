@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Bulk Actions Exporter (FBX)",
     "author": "sivert-io (orig), nebobyeoli (fork)",
-    "version": (2, 3, 1),
+    "version": (2, 3, 2),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Actions Exporter", # actual sidebar is set via bl_category in each class
     "description": "Bulk Actions exporter in FBX format for Blender 4.0+, with additional QOL options",
@@ -88,7 +88,7 @@ class FBXExportSettings(PropertyGroup):
         default='X'
     )
 
-    # Options addition STEP 1: Update the Properties
+    ## Options addition STEP 1: Update the Properties
     use_selection: BoolProperty(name="Selected Objects", default=False)
     use_visible: BoolProperty(name="Visible Objects", default=True)
     use_active_collection: BoolProperty(name="Active Collection", default=False)
@@ -116,7 +116,15 @@ class FBXExportSettings(PropertyGroup):
     bake_anim_force_startend_keying: BoolProperty(name="Force Start/End Keying", default=False)
     bake_anim_step: FloatProperty(name="Sampling Rate", default=1.0, min=0.01, max=100.0)
     bake_anim_simplify_factor: FloatProperty(name="Simplify", default=0.00, min=0.0, max=10.0)
-    # end of STEP 1
+    ## end of STEP 1
+
+    # File Naming
+    name_prefix: StringProperty(name="Add Prefix", default="")
+    name_postfix: StringProperty(name="Add Postfix", default="")
+    remove_prefix: StringProperty(name="Remove Prefix", default="", description="Removes this specific string from the start of the action name")
+    remove_postfix: StringProperty(name="Remove Postfix", default="", description="Removes this specific string from the end of the action name")
+
+
 
 
 # ─── NATIVE FBX PRESET COMPATIBILITY SYSTEM ──────────────────────────────────
@@ -237,6 +245,30 @@ class FBX_PT_path(Panel):
         layout = self.layout
         layout.prop(context.scene.fbx_export, "export_path")
 
+
+class FBX_PT_naming(Panel):
+    bl_label = "File Naming"
+    bl_parent_id = "FBX_PT_export_main"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Actions Exporter"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        p = context.scene.fbx_export
+        layout = self.layout
+        
+        col = layout.column(align=True)
+        col.label(text="Add Modifiers:")
+        col.prop(p, "name_prefix")
+        col.prop(p, "name_postfix")
+        
+        col_remove = layout.column(align=True)
+        col_remove.label(text="Remove Patterns:")
+        col_remove.prop(p, "remove_prefix")
+        col_remove.prop(p, "remove_postfix")
+
+
 class FBX_PT_transform(Panel):
     bl_label = "Transform"
     bl_parent_id = "FBX_PT_export_main"
@@ -293,7 +325,7 @@ class FBX_PT_armature(Panel):
         layout.prop(p, "use_armature_deform_only")
         layout.prop(p, "add_leaf_bones")
 
-# Options addition STEP 2: Add the UI Panels
+## Options addition STEP 2: Add the UI Panels
 class FBX_PT_include(Panel):
     bl_label = "Include"
     bl_parent_id = "FBX_PT_export_main"
@@ -337,7 +369,7 @@ class FBX_PT_animation(Panel):
         layout.prop(p, "bake_anim_force_startend_keying")
         layout.prop(p, "bake_anim_step")
         layout.prop(p, "bake_anim_simplify_factor")
-# end of STEP 2
+## end of STEP 2
 
 
 class FBX_PT_export_button(Panel):
@@ -362,7 +394,7 @@ class ExportAllActionsOperator(Operator):
         if not obj or obj.type != 'ARMATURE':
             self.report({'ERROR'}, "Select an Armature")
             return {'CANCELLED'}
-
+        
 
 
         ### Edit "Export Path"
@@ -419,10 +451,24 @@ class ExportAllActionsOperator(Operator):
 
             scene.frame_start = start
             scene.frame_end = end
-            filepath = os.path.join(export_path, f"{action.name}.fbx")
+            
+            
+            ## Process string removal and additions
+            # filepath = os.path.join(export_path, f"{action.name}.fbx")
+            export_name = action.name
+            
+            if p.remove_prefix and export_name.startswith(p.remove_prefix):
+                export_name = export_name[len(p.remove_prefix):]
+            if p.remove_postfix and export_name.endswith(p.remove_postfix):
+                export_name = export_name[:-len(p.remove_postfix)]
+            
+            ## Combine final filename with configured strings
+            final_filename = f"{p.name_prefix}{export_name}{p.name_postfix}.fbx"
+            filepath = os.path.join(export_path, final_filename)
+
 
             try:
-                # Options addition STEP 3: Update the Operator Parameters
+                ## Options addition STEP 3: Update the Operator Parameters
                 bpy.ops.export_scene.fbx(
                     filepath=filepath,
                     use_selection=p.use_selection,
@@ -461,7 +507,7 @@ class ExportAllActionsOperator(Operator):
                     bake_anim_step=p.bake_anim_step,
                     bake_anim_simplify_factor=p.bake_anim_simplify_factor
                 )
-                # end of STEP 3
+                ## end of STEP 3
 
                 exported += 1
             except Exception as e:
@@ -479,7 +525,7 @@ class ExportAllActionsOperator(Operator):
         self.report({'INFO'}, f"Exported {exported} actions")
         return {'FINISHED'}
 
-# Options addition STEP 4: Register the Panels (added FBX_PT_include, FBX_PT_animation to the list)
+## Options addition STEP 4: Register the Panels (added FBX_PT_include, FBX_PT_animation to the list)
 classes = [
     FBXExportSettings,
 
@@ -488,6 +534,8 @@ classes = [
     FBX_PT_export_main,
     FBX_PT_export_presets_panel,
     FBX_PT_path,
+
+    FBX_PT_naming,
 
     FBX_PT_include,
     FBX_PT_transform,
