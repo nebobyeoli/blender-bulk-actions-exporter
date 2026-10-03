@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Bulk Actions Exporter (FBX)",
     "author": "sivert-io (orig), nebobyeoli (fork)",
-    "version": (2, 3, 3),
+    "version": (2, 3, 4),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Actions Exporter", # actual sidebar is set via bl_category in each class
     "description": "Bulk Actions exporter in FBX format for Blender 4.0+, with additional QOL options",
@@ -270,6 +270,38 @@ class FBX_PT_path(Panel):
         layout.prop(context.scene.fbx_export, "export_path")
 
 
+
+def get_predicted_export_name(action_name, p):
+    """Processes an action name based on the addon naming/regex settings."""
+    export_name = action_name
+    
+    if p.use_regex:
+        if p.regex_find:
+            try:
+                export_name = re.sub(p.regex_find, p.regex_replace, export_name)
+            except Exception:
+                pass  # Ignore invalid regex patterns during live typing
+    else:
+        if p.remove_prefix and export_name.startswith(p.remove_prefix):
+            export_name = export_name[len(p.remove_prefix):]
+            
+        if p.remove_postfix and export_name.endswith(p.remove_postfix):
+            export_name = export_name[:-len(p.remove_postfix)]
+            
+        export_name = f"{p.name_prefix}{export_name}{p.name_postfix}"
+        
+    # Auto-validation: Strip illegal Windows/Unix path characters (/, \, ?, *, :, ", <, >, |)
+    illegal_chars = ['/', '\\', '?', '*', ':', '"', '<', '>', '|']
+    for char in illegal_chars:
+        export_name = export_name.replace(char, "")
+        
+    # Fallback to a default name if the string ends up completely empty
+    if not export_name.strip():
+        export_name = "unnamed_action"
+        
+    return export_name
+
+
 class FBX_PT_naming(Panel):
     bl_label = "File Naming"
     bl_parent_id = "FBX_PT_export_main"
@@ -323,6 +355,21 @@ class FBX_PT_naming(Panel):
             col_remove.label(text="Remove Patterns:")
             col_remove.prop(p, "remove_prefix")
             col_remove.prop(p, "remove_postfix")
+
+
+        # ─── Live Preview Element ───
+        layout.separator()
+        obj = context.object
+        active_action = obj.animation_data.action if (obj and obj.animation_data) else None
+        
+        box = layout.box()
+        box.label(text="Live Naming Preview:", icon='FILE_TICK')
+        if active_action:
+            preview_name = get_predicted_export_name(active_action.name, p)
+            box.label(text=f"Original: {active_action.name}", icon='DOT')
+            box.label(text=f"Export:   {preview_name}.fbx", icon='CHECKMARK')
+        else:
+            box.label(text="No active action found on selected object.", icon='ERROR')
 
 
 
@@ -505,35 +552,39 @@ class ExportAllActionsOperator(Operator):
             strip = track.strips.new(action.name, start, action)
             strip.action_frame_start = start
             strip.action_frame_end = end
-
+            
             scene.frame_start = start
             scene.frame_end = end
             
             
-            ## Process string removal and additions
-            # filepath = os.path.join(export_path, f"{action.name}.fbx")
-            export_name = action.name
-            
-            if p.use_regex:
-                # Process Regex renaming pipeline
-                if p.regex_find:
-                    try:
-                        export_name = re.sub(p.regex_find, p.regex_replace, export_name)
-                    except Exception as re_err:
-                        self.report({'WARNING'}, f"Regex Error on {action.name}: {re_err}")
-                final_filename = f"{export_name}.fbx"
+            # ## Process string removal and additions
+            # # filepath = os.path.join(export_path, f"{action.name}.fbx")
+            # export_name = action.name
+            # 
+            # if p.use_regex:
+            #     # Process Regex renaming pipeline
+            #     if p.regex_find:
+            #         try:
+            #             export_name = re.sub(p.regex_find, p.regex_replace, export_name)
+            #         except Exception as re_err:
+            #             self.report({'WARNING'}, f"Regex Error on {action.name}: {re_err}")
+            #     final_filename = f"{export_name}.fbx"
+            # 
+            # else:
+            #     # Process standard string removal and additions
+            #     if p.remove_prefix and export_name.startswith(p.remove_prefix):
+            #         export_name = export_name[len(p.remove_prefix):]
+            #     if p.remove_postfix and export_name.endswith(p.remove_postfix):
+            #         export_name = export_name[:-len(p.remove_postfix)]
+            # 
+            #     # Combine final filename with configured strings
+            #     final_filename = f"{p.name_prefix}{export_name}{p.name_postfix}.fbx"
+            # 
+            # filepath = os.path.join(export_path, final_filename)
 
-            else:
-                # Process standard string removal and additions
-                if p.remove_prefix and export_name.startswith(p.remove_prefix):
-                    export_name = export_name[len(p.remove_prefix):]
-                if p.remove_postfix and export_name.endswith(p.remove_postfix):
-                    export_name = export_name[:-len(p.remove_postfix)]
-                
-                # Combine final filename with configured strings
-                final_filename = f"{p.name_prefix}{export_name}{p.name_postfix}.fbx"
-            
-            filepath = os.path.join(export_path, final_filename)
+            # Use our unified sanitization and conversion helper function
+            export_name = get_predicted_export_name(action.name, p)
+            filepath = os.path.join(export_path, f"{export_name}.fbx")
 
 
             try:
