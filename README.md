@@ -1,10 +1,10 @@
 # Bulk Actions Exporter (FBX)
 
-# Parent repository
+## Parent repository
 
-## [sivert-io/fbx-action-exporter (*"🛠️ FBX Action Exporter for Blender"*)](https://github.com/sivert-io/fbx-action-exporter)
+### [sivert-io/fbx-action-exporter (*"🛠️ FBX Action Exporter for Blender"*)](https://github.com/sivert-io/fbx-action-exporter)
 
-# About
+## About
 
 Bulk actions exporter in FBX format for Blender 4.0+, with additional QOL options.
 
